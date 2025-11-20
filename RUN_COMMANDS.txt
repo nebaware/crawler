@@ -1,0 +1,120 @@
+========================================
+COMMAND PROMPT COMMANDS FOR WINDOWS
+========================================
+
+STEP 1: Check Docker is Running
+--------------------------------
+docker --version
+docker ps
+
+
+STEP 2: Start All Services
+---------------------------
+docker-compose up -d
+
+
+STEP 3: Wait for Services (10 seconds)
+---------------------------------------
+timeout /t 10 /nobreak
+
+
+STEP 4: Run Database Migrations
+--------------------------------
+docker-compose exec web python manage.py migrate
+
+
+STEP 5: Check Services Status
+------------------------------
+docker-compose ps
+
+
+STEP 6: Open Application
+-------------------------
+start http://localhost:8081
+
+
+========================================
+ADDITIONAL USEFUL COMMANDS
+========================================
+
+View All Logs:
+--------------
+docker-compose logs -f
+
+View Web Service Logs Only:
+----------------------------
+docker-compose logs -f web
+
+View Worker Logs Only:
+----------------------
+docker-compose logs -f worker
+
+Stop All Services:
+------------------
+docker-compose down
+
+Restart Services:
+-----------------
+docker-compose restart
+
+Scale Workers (5 workers):
+--------------------------
+docker-compose up --scale worker=5 -d
+
+Reset Everything (Delete Data):
+--------------------------------
+docker-compose down -v
+docker-compose up -d
+docker-compose exec web python manage.py migrate
+
+Create Admin User:
+------------------
+docker-compose exec web python manage.py createsuperuser
+
+Access Django Shell:
+--------------------
+docker-compose exec web python manage.py shell
+
+Run Tests:
+----------
+docker-compose exec web python manage.py test
+
+
+========================================
+TROUBLESHOOTING COMMANDS
+========================================
+
+If Port 8081 is Already in Use:
+--------------------------------
+netstat -ano | findstr :8081
+
+Kill Process Using Port:
+------------------------
+taskkill /PID <process_id> /F
+
+Remove All Containers:
+----------------------
+docker-compose down
+docker system prune -a
+
+Check Docker Disk Space:
+------------------------
+docker system df
+
+View Container Details:
+-----------------------
+docker-compose exec web env
+
+
+========================================
+COPY & PASTE - FULL STARTUP SEQUENCE
+========================================
+
+docker-compose up -d && timeout /t 10 /nobreak && docker-compose exec web python manage.py migrate && start http://localhost:8081
+
+
+========================================
+COPY & PASTE - STOP AND CLEANUP
+========================================
+
+docker-compose down -v

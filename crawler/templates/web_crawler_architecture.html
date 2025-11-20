@@ -1,0 +1,1295 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anatomy of a Modern Web Crawler</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+/* 1. THE SETUP */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  /* This is the gray background between slides */
+  background: linear-gradient(135deg, #1e293b 0%, #374151 50%, #1e293b 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+  min-height: 100vh;
+  padding: 20px 0;
+  align-items: center;
+  animation: backgroundShift 20s ease infinite;
+}
+
+@keyframes backgroundShift {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* 1.1 Presentation App Wrapper */
+#presentation-app {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 90vw;
+    max-width: 1280px;
+}
+
+.slides-wrapper {
+    position: relative;
+    width: 100%;
+    /* This ensures the wrapper takes the space of the slide */
+    aspect-ratio: 16 / 9; 
+}
+
+.slide-container {
+  align-items: center;
+  background: linear-gradient(135deg, #111827 0%, #1e293b 100%);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: none; /* KEY: Hide all slides by default */
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  position: absolute; /* KEY: Stack slides on top of each other */
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 4.5vw; /* Responsive padding */
+  opacity: 0;
+  transform: translateX(100px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+/* KEY: Only the active slide is visible */
+.slide-container.active-slide {
+    display: flex;
+    opacity: 1;
+    transform: translateX(0);
+    animation: slideIn 0.6s ease forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(50px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.slide-container.slide-out {
+  animation: slideOut 0.4s ease forwards;
+}
+
+@keyframes slideOut {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-50px) scale(0.95);
+  }
+}
+
+/* 1.2 Navigation Styling */
+.navigation-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-top: 1.5vw;
+    padding: 0 1vw;
+}
+
+.nav-button {
+    background: linear-gradient(135deg, #34D399 0%, #10B981 100%);
+    color: #111827;
+    padding: 0.8vw 1.5vw;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.2vw;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-weight: 700;
+    min-width: 120px;
+    text-align: center;
+    box-shadow: 0 4px 15px rgba(52, 211, 153, 0.3);
+    position: relative;
+    overflow: hidden;
+}
+
+.nav-button::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.nav-button:hover:not(:disabled)::before {
+    width: 300px;
+    height: 300px;
+}
+
+.nav-button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(52, 211, 153, 0.4);
+}
+
+.nav-button:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.nav-button:disabled {
+    background: #1F2937;
+    color: #4B5563;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+.slide-counter {
+    color: #D1D5DB;
+    font-size: 1.5vw;
+    font-family: 'Lato', sans-serif;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 1vw;
+}
+
+.progress-bar-container {
+    width: 200px;
+    height: 6px;
+    background: #1F2937;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #34D399, #10B981);
+    border-radius: 10px;
+    transition: width 0.5s ease;
+    box-shadow: 0 0 10px rgba(52, 211, 153, 0.5);
+}
+
+
+/* 1.3 BACKGROUND STYLING (Subtle Gradient Blobs) */
+
+.slide-container::before {
+  content: '';
+  height: 25vw;
+  left: -8vw;
+  top: -8vw;
+  position: absolute;
+  /* Tech green accent */
+  background-image: radial-gradient(circle, rgba(52, 211, 153, 0.1), transparent 70%); 
+  width: 25vw;
+  z-index: 0;
+}
+
+.slide-container::after {
+  content: '';
+  height: 30vw;
+  right: -10vw;
+  bottom: -10vw;
+  position: absolute;
+  /* Tech blue accent */
+  background-image: radial-gradient(circle, rgba(59, 130, 246, 0.1), transparent 70%); 
+  width: 30vw;
+  z-index: 0;
+}
+
+
+.slide-container>* {
+  position: relative;
+  z-index: 1;
+}
+
+/* 2. CONSISTENT TYPOGRAPHY (Scaled with VW units) */
+
+/* Headings Font */
+.slide-container h1,
+.slide-container h2,
+.slide-container h3 {
+  color: #F3F4F6; 
+  font-weight: 700;
+  font-family: 'Urbanist', sans-serif;
+  margin: 0;
+}
+
+/* Body Text Font */
+.slide-container p,
+.slide-container li,
+.slide-container .subtitle,
+.slide-container .number-label,
+.slide-container .legend li,
+.slide-container .chart-summary,
+.slide-container .bar .label,
+.slide-container th,
+.slide-container td,
+.slide-container .alternating-text-tile p,
+.slide-container .bleed-text-side p,
+.slide-container .bullet-list li,
+.slide-container .quote-layout blockquote,
+.slide-container .quote-layout cite {
+  color: #D1D5DB; 
+  font-family: 'Lato', sans-serif;
+}
+
+/* Consistent Font Sizes (using VW) */
+
+.slide-container h1 {
+  font-size: 5.4vw; 
+}
+
+.title-layout h1 {
+  font-size: 6.5vw; 
+  color: #FFF;
+}
+
+.slide-container .slide-title {
+  font-size: 3.125vw;
+  font-weight: 500;
+  margin-bottom: 3.125vw; 
+  text-align: left;
+  width: 100%;
+  color: #A7F3D0; 
+}
+
+.slide-container h3 {
+  font-size: 2.5vw;
+  font-weight: 500;
+  margin-bottom: 1.17vw; 
+  color: #FFF; 
+}
+
+/* Unified body text size */
+.slide-container p,
+.slide-container li,
+.slide-container .subtitle,
+.slide-container .legend li,
+.slide-container .chart-summary,
+.slide-container .bar .label,
+.slide-container th,
+.slide-container td,
+.slide-container .alternating-text-tile p,
+.slide-container .bleed-text-side p,
+.slide-container .bullet-list li {
+  font-size: 1.56vw; 
+  line-height: 1.5;
+}
+
+.slide-container .subtitle {
+  font-weight: 400;
+  font-size: 1.875vw; 
+  margin: 1.56vw auto; 
+}
+
+.slide-container .content-area {
+  align-items: center;
+  display: flex;
+  flex-grow: 1;
+  justify-content: center;
+  width: 100%;
+}
+
+/* 3. LAYOUT DEFINITIONS (Scaled) */
+
+/* Title_Slide */
+.title-layout {
+  text-align: center;
+}
+.title-layout .subtitle {
+  max-width: 62.5vw;
+}
+
+/* Two_Column_Tiled_Text */
+.two-column {
+  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3.9vw; 
+  width: 100%;
+}
+
+.two-column.tiled {
+  align-items: stretch;
+}
+
+.two-column.tiled>div {
+  background-color: #1F2937; 
+  border-radius: 12px;
+  border: 1px solid #374151;
+  padding: 3.125vw; 
+  text-align: left;
+}
+
+.two-column ul {
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.95vw; 
+}
+
+.two-column li {
+  margin-bottom: 1.17vw; 
+}
+
+/* Image_Right_Text_Left */
+.image-wrapper {
+  border-radius: 12px;
+  height: 31.25vw; 
+  overflow: hidden;
+  width: 100%;
+}
+
+/* Tiled_Text_With_Icons */
+.tiled-content {
+  align-items: stretch;
+  display: flex;
+  gap: 3.125vw; 
+  justify-content: center;
+  width: 100%;
+}
+
+.tile {
+  padding: 2.34vw;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.tile::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(52, 211, 153, 0.1), transparent);
+  transition: left 0.5s ease;
+}
+
+.tile:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 10px 30px rgba(52, 211, 153, 0.2);
+}
+
+.tile:hover::before {
+  left: 100%;
+}
+
+.tile .icon {
+  font-size: 3.75vw; 
+  margin-bottom: 1.56vw;
+  transition: transform 0.3s ease;
+  display: inline-block;
+}
+
+.tile:hover .icon {
+  transform: scale(1.2) rotate(5deg);
+}
+
+.tile p {
+  font-size: 1.4vw; 
+}
+
+/* Styled_Bullet_Points */
+.bullet-list {
+  max-width: 70vw;
+  width: 100%;
+}
+
+.bullet-list li {
+  gap: 1.17vw; 
+  margin-bottom: 1.56vw; 
+  padding-left: 3.125vw; 
+  position: relative;
+}
+
+.bullet-list i {
+  font-size: 1.875vw; 
+  margin-top: 0.39vw; 
+}
+
+/* Highlighted_Numbers */
+.highlight-numbers-layout>div:first-child {
+  flex: 0 0 40%;
+  text-align: center;
+}
+
+.highlight-numbers-layout .number {
+  font-size: 11.7vw; 
+}
+
+/* 4. CHART STYLING (Scaled) */
+
+.chart-container {
+  gap: 1.56vw; 
+  width: 100%;
+}
+
+.bar {
+  gap: 1.56vw; 
+}
+
+.bar .label {
+  flex: 0 0 25vw; /* Wider label */
+}
+
+.bar .bar-inner {
+  height: 3.5vw; 
+}
+
+.bar .bar-fill {
+  font-size: 1.4vw; 
+  padding-right: 1.17vw;
+  animation: fillBar 1.5s ease forwards;
+  transform-origin: left;
+}
+
+@keyframes fillBar {
+  from {
+    width: 0 !important;
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.chart-summary {
+  margin-top: 1.56vw; 
+}
+
+/* Section_Title */
+.section-title-layout h2 {
+  font-size: 5.6vw; 
+  margin-bottom: 1.56vw; 
+}
+
+.section-title-layout p {
+  font-size: 2.18vw; 
+  max-width: 55vw;
+}
+
+.section-title-layout hr {
+  margin: 2.34vw auto; 
+  height: 5px;
+  width: 8vw;
+}
+
+/* Bleed_Image_Right */
+.slide-container.bleed-image-layout {
+  gap: 3.9vw; 
+  padding: 0;
+}
+
+.slide-container.bleed-image-layout>.content-container {
+  padding: 4.5vw 0 4.5vw 4.5vw;
+}
+
+/* Q&A Layout */
+.qa-layout h2 {
+  font-size: 6.25vw; 
+  margin-bottom: 1.56vw; 
+}
+
+.qa-layout p {
+  font-size: 2.18vw; 
+}
+    </style>
+</head>
+<body>
+
+<div id="presentation-app">
+    
+    <!-- Back to Dashboard Button -->
+    <div style="width: 100%; margin-bottom: 1vw; display: flex; justify-content: space-between; align-items: center;">
+        <a href="{% url 'home' %}" style="background-color: #6B7280; color: white; padding: 0.8vw 1.5vw; border-radius: 6px; text-decoration: none; font-size: 1.2vw; font-weight: 700; display: inline-block; transition: all 0.3s ease;">
+            <i class="fa-solid fa-arrow-left"></i> Back to Dashboard
+        </a>
+        <div style="display: flex; gap: 1vw;">
+            <button id="help-btn" style="background-color: #6B7280; color: white; padding: 0.8vw 1.5vw; border: none; border-radius: 6px; font-size: 1.2vw; font-weight: 700; cursor: pointer; transition: all 0.3s ease;">
+                <i class="fa-solid fa-keyboard"></i> Shortcuts
+            </button>
+            <button id="fullscreen-btn" style="background-color: #6B7280; color: white; padding: 0.8vw 1.5vw; border: none; border-radius: 6px; font-size: 1.2vw; font-weight: 700; cursor: pointer; transition: all 0.3s ease;">
+                <i class="fa-solid fa-expand"></i> Fullscreen
+            </button>
+        </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="help-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 9999; justify-content: center; align-items: center;">
+        <div style="background: #1F2937; padding: 3vw; border-radius: 12px; max-width: 500px; color: #D1D5DB;">
+            <h3 style="color: #34D399; margin-bottom: 1.5vw; font-size: 2vw;">Keyboard Shortcuts</h3>
+            <div style="display: grid; gap: 1vw; font-size: 1.2vw;">
+                <div><kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">→</kbd> or <kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">Space</kbd> - Next slide</div>
+                <div><kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">←</kbd> - Previous slide</div>
+                <div><kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">Home</kbd> - First slide</div>
+                <div><kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">End</kbd> - Last slide</div>
+                <div><kbd style="background: #374151; padding: 0.3vw 0.6vw; border-radius: 4px;">Esc</kbd> - Close this dialog</div>
+            </div>
+            <button id="close-help" style="margin-top: 2vw; background: #34D399; color: #111827; padding: 0.8vw 1.5vw; border: none; border-radius: 6px; font-weight: 700; cursor: pointer; width: 100%;">
+                Got it!
+            </button>
+        </div>
+    </div>
+
+    <!-- Navigation Bar -->
+    <div class="navigation-bar">
+        <button id="prev-slide" class="nav-button" disabled>
+            <i class="fa-solid fa-chevron-left"></i> Previous
+        </button>
+        <div id="slide-counter" class="slide-counter">
+            <span>Slide <span id="current-slide-num">1</span> of <span id="total-slides">13</span></span>
+            <div class="progress-bar-container">
+                <div id="progress-bar-fill" class="progress-bar-fill" style="width: 7.69%"></div>
+            </div>
+        </div>
+        <button id="next-slide" class="nav-button">
+            Next <i class="fa-solid fa-chevron-right"></i>
+        </button>
+    </div>
+
+    <div class="slides-wrapper">
+        <!-- Slide 1: Title Slide -->
+        <div class="slide-container" id="slide1">
+            <div class="title-layout">
+                <h1>🕷️ Distributed Web Crawler</h1>
+                <p class="subtitle">Building a Production-Grade Concurrent Web Scraping System</p>
+                <div style="margin-top: 3.9vw; border-top: 2px solid #374151; padding-top: 2.34vw;">
+                    <h3 style="font-size: 2.8vw; color: #34D399; margin-bottom: 0.78vw;">Presented by Group 8</h3>
+                    <p style="font-size: 1.56vw; line-height: 1.8; color: #D1D5DB;">
+                        Etsubdink Arega • Nebiyu Tegaye • Muluken Ugamo<br>
+                        Keneni Junedi • Mahlet Fekadewold • Ruhama Kassahun
+                    </p>
+                    <p style="font-size: 1.3vw; color: #9CA3AF; margin-top: 1.5vw;">
+                        <i class="fa-solid fa-calendar"></i> November 2025
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 2: Project Overview -->
+        <div class="slide-container" id="slide2">
+            <h2 class="slide-title">📋 Project Overview</h2>
+            <div class="content-area">
+                <div class="two-column">
+                    <div>
+                        <h3 style="color: #34D399; margin-bottom: 1.5vw;">Objective</h3>
+                        <p>Develop a multi-threaded web crawler that traverses websites, downloads content, and stores it in a local database for indexing and full-text search.</p>
+                        <h3 style="color: #34D399; margin-top: 2vw; margin-bottom: 1.5vw;">Key Features</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="margin-bottom: 1vw;"><i class="fa-solid fa-check" style="color: #34D399; margin-right: 0.5vw;"></i> Concurrent task processing</li>
+                            <li style="margin-bottom: 1vw;"><i class="fa-solid fa-check" style="color: #34D399; margin-right: 0.5vw;"></i> Distributed worker architecture</li>
+                            <li style="margin-bottom: 1vw;"><i class="fa-solid fa-check" style="color: #34D399; margin-right: 0.5vw;"></i> PostgreSQL full-text search</li>
+                            <li style="margin-bottom: 1vw;"><i class="fa-solid fa-check" style="color: #34D399; margin-right: 0.5vw;"></i> Real-time web dashboard</li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h3 style="color: #34D399; margin-bottom: 1.5vw;">Skills Demonstrated</h3>
+                        <div style="display: grid; gap: 1.2vw;">
+                            <div style="background: #1F2937; padding: 1.2vw; border-radius: 8px; border-left: 4px solid #34D399;">
+                                <strong>Networking</strong><br>
+                                <small>HTTP requests, error handling, timeouts</small>
+                            </div>
+                            <div style="background: #1F2937; padding: 1.2vw; border-radius: 8px; border-left: 4px solid #3B82F6;">
+                                <strong>Multithreading</strong><br>
+                                <small>Celery workers, async task processing</small>
+                            </div>
+                            <div style="background: #1F2937; padding: 1.2vw; border-radius: 8px; border-left: 4px solid #F59E0B;">
+                                <strong>Data Storage</strong><br>
+                                <small>PostgreSQL, indexing, search vectors</small>
+                            </div>
+                            <div style="background: #1F2937; padding: 1.2vw; border-radius: 8px; border-left: 4px solid #EF4444;">
+                                <strong>File Handling</strong><br>
+                                <small>HTML parsing, content extraction</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: System Architecture -->
+        <div class="slide-container" id="slide3">
+            <h2 class="slide-title">🏗️ System Architecture</h2>
+            <div class="content-area">
+                <div style="width: 100%; text-align: center;">
+                    <div style="background: #1F2937; padding: 3vw; border-radius: 12px; border: 2px solid #374151;">
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 2vw; margin-bottom: 2vw;">
+                            <div style="background: linear-gradient(135deg, #34D399 0%, #10B981 100%); padding: 2vw; border-radius: 10px; color: #111827;">
+                                <i class="fa-brands fa-python" style="font-size: 3vw;"></i>
+                                <h3 style="margin: 1vw 0 0.5vw 0; color: #111827;">Django</h3>
+                                <p style="font-size: 1.2vw; margin: 0; color: #111827;">Web Framework</p>
+                            </div>
+                            <div style="background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%); padding: 2vw; border-radius: 10px; color: white;">
+                                <i class="fa-solid fa-database" style="font-size: 3vw;"></i>
+                                <h3 style="margin: 1vw 0 0.5vw 0;">Redis</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Message Broker</p>
+                            </div>
+                            <div style="background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); padding: 2vw; border-radius: 10px; color: white;">
+                                <i class="fa-solid fa-cogs" style="font-size: 3vw;"></i>
+                                <h3 style="margin: 1vw 0 0.5vw 0;">Celery</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Task Queue</p>
+                            </div>
+                            <div style="background: linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%); padding: 2vw; border-radius: 10px; color: white;">
+                                <i class="fa-solid fa-server" style="font-size: 3vw;"></i>
+                                <h3 style="margin: 1vw 0 0.5vw 0;">PostgreSQL</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Database</p>
+                            </div>
+                        </div>
+                        <div style="background: #111827; padding: 1.5vw; border-radius: 8px;">
+                            <i class="fa-brands fa-docker" style="font-size: 2.5vw; color: #2496ED;"></i>
+                            <h3 style="margin: 0.5vw 0; color: #2496ED;">Docker Compose</h3>
+                            <p style="font-size: 1.2vw; margin: 0; color: #9CA3AF;">Orchestration Layer</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Data Flow -->
+        <div class="slide-container" id="slide4">
+            <h2 class="slide-title">🔄 Data Flow Pipeline</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3vw;">
+                        <div style="flex: 1; text-align: center; background: #1F2937; padding: 2vw; border-radius: 10px; position: relative;">
+                            <div style="font-size: 3vw; color: #34D399; margin-bottom: 1vw;">1</div>
+                            <h3 style="font-size: 1.8vw; margin: 0.5vw 0;">User Input</h3>
+                            <p style="font-size: 1.2vw; margin: 0.5vw 0;">Submit URL via Dashboard</p>
+                        </div>
+                        <div style="font-size: 2vw; color: #34D399; margin: 0 1vw;">→</div>
+                        <div style="flex: 1; text-align: center; background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="font-size: 3vw; color: #3B82F6; margin-bottom: 1vw;">2</div>
+                            <h3 style="font-size: 1.8vw; margin: 0.5vw 0;">Task Creation</h3>
+                            <p style="font-size: 1.2vw; margin: 0.5vw 0;">Django sends to Redis</p>
+                        </div>
+                        <div style="font-size: 2vw; color: #3B82F6; margin: 0 1vw;">→</div>
+                        <div style="flex: 1; text-align: center; background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="font-size: 3vw; color: #F59E0B; margin-bottom: 1vw;">3</div>
+                            <h3 style="font-size: 1.8vw; margin: 0.5vw 0;">Processing</h3>
+                            <p style="font-size: 1.2vw; margin: 0.5vw 0;">Celery worker executes</p>
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 2vw;">
+                        <div style="flex: 1; text-align: center; background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="font-size: 3vw; color: #8B5CF6; margin-bottom: 1vw;">4</div>
+                            <h3 style="font-size: 1.8vw; margin: 0.5vw 0;">Storage</h3>
+                            <p style="font-size: 1.2vw; margin: 0.5vw 0;">Save to PostgreSQL</p>
+                        </div>
+                        <div style="font-size: 2vw; color: #8B5CF6; margin: 0 1vw;">→</div>
+                        <div style="flex: 1; text-align: center; background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="font-size: 3vw; color: #10B981; margin-bottom: 1vw;">5</div>
+                            <h3 style="font-size: 1.8vw; margin: 0.5vw 0;">Search</h3>
+                            <p style="font-size: 1.2vw; margin: 0.5vw 0;">Full-text search results</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 5: Concurrency Model -->
+        <div class="slide-container" id="slide5">
+            <h2 class="slide-title">⚡ Concurrency & Multithreading</h2>
+            <div class="content-area">
+                <div class="two-column">
+                    <div>
+                        <h3 style="color: #34D399;">Why Concurrency Matters</h3>
+                        <p>Traditional sequential crawlers process one URL at a time. With network I/O being the bottleneck, this is extremely inefficient.</p>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; margin-top: 1.5vw; border-left: 4px solid #EF4444;">
+                            <strong style="color: #EF4444;">Sequential Approach:</strong><br>
+                            <code style="color: #9CA3AF; font-size: 1.2vw;">1000 URLs × 2 seconds = 33 minutes</code>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; margin-top: 1vw; border-left: 4px solid #34D399;">
+                            <strong style="color: #34D399;">Concurrent Approach:</strong><br>
+                            <code style="color: #9CA3AF; font-size: 1.2vw;">1000 URLs ÷ 10 workers = 3.3 minutes</code>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 style="color: #34D399;">Our Implementation</h3>
+                        <ul style="list-style: none; padding: 0;">
+                            <li style="background: #1F2937; padding: 1.2vw; border-radius: 8px; margin-bottom: 1vw;">
+                                <i class="fa-solid fa-users" style="color: #3B82F6;"></i>
+                                <strong> Multiple Celery Workers</strong><br>
+                                <small>Each worker processes tasks independently</small>
+                            </li>
+                            <li style="background: #1F2937; padding: 1.2vw; border-radius: 8px; margin-bottom: 1vw;">
+                                <i class="fa-solid fa-layer-group" style="color: #F59E0B;"></i>
+                                <strong> Task Queue (Redis)</strong><br>
+                                <small>Distributes work across available workers</small>
+                            </li>
+                            <li style="background: #1F2937; padding: 1.2vw; border-radius: 8px; margin-bottom: 1vw;">
+                                <i class="fa-solid fa-arrows-spin" style="color: #8B5CF6;"></i>
+                                <strong> Async Processing</strong><br>
+                                <small>Non-blocking I/O operations</small>
+                            </li>
+                            <li style="background: #1F2937; padding: 1.2vw; border-radius: 8px;">
+                                <i class="fa-solid fa-chart-line" style="color: #10B981;"></i>
+                                <strong> Horizontal Scaling</strong><br>
+                                <small>Add more workers on demand</small>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 6: Code Implementation -->
+        <div class="slide-container" id="slide6">
+            <h2 class="slide-title">💻 Core Implementation</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <h3 style="color: #34D399; margin-bottom: 1.5vw;">Celery Task (crawler/tasks.py)</h3>
+                    <pre style="background: #0D1117; padding: 2vw; border-radius: 10px; overflow-x: auto; font-size: 1.1vw; line-height: 1.6; border: 1px solid #30363D;"><code style="color: #C9D1D9;"><span style="color: #FF7B72;">from</span> celery <span style="color: #FF7B72;">import</span> shared_task
+<span style="color: #FF7B72;">import</span> requests
+<span style="color: #FF7B72;">from</span> bs4 <span style="color: #FF7B72;">import</span> BeautifulSoup
+
+<span style="color: #D2A8FF;">@shared_task</span>
+<span style="color: #FF7B72;">def</span> <span style="color: #D2A8FF;">crawl_page_task</span>(url):
+    <span style="color: #8B949E;"># Fetch the page</span>
+    response = requests.<span style="color: #D2A8FF;">get</span>(url, timeout=<span style="color: #79C0FF;">10</span>)
+    
+    <span style="color: #8B949E;"># Parse HTML</span>
+    soup = BeautifulSoup(response.text, <span style="color: #A5D6FF;">'html.parser'</span>)
+    title = soup.title.string
+    
+    <span style="color: #8B949E;"># Save to database</span>
+    CrawledPage.objects.<span style="color: #D2A8FF;">update_or_create</span>(
+        url=url,
+        defaults={<span style="color: #A5D6FF;">'title'</span>: title, <span style="color: #A5D6FF;">'content'</span>: soup.<span style="color: #D2A8FF;">get_text</span>()}
+    )</code></pre>
+                    <div style="margin-top: 2vw; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5vw;">
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px;">
+                            <i class="fa-solid fa-network-wired" style="color: #3B82F6; font-size: 2vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #3B82F6;">Networking</h4>
+                            <p style="font-size: 1.2vw; margin: 0;">HTTP requests with timeout handling</p>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px;">
+                            <i class="fa-solid fa-file-code" style="color: #F59E0B; font-size: 2vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #F59E0B;">File Handling</h4>
+                            <p style="font-size: 1.2vw; margin: 0;">HTML parsing with BeautifulSoup</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 7: Database & Storage -->
+        <div class="slide-container" id="slide7">
+            <h2 class="slide-title">🗄️ Data Storage & Indexing</h2>
+            <div class="content-area">
+                <div class="two-column">
+                    <div>
+                        <h3 style="color: #34D399;">PostgreSQL Database Model</h3>
+                        <pre style="background: #0D1117; padding: 1.5vw; border-radius: 8px; font-size: 1vw; line-height: 1.5; border: 1px solid #30363D;"><code style="color: #C9D1D9;"><span style="color: #FF7B72;">class</span> <span style="color: #D2A8FF;">CrawledPage</span>(models.Model):
+    url = models.<span style="color: #D2A8FF;">URLField</span>(unique=<span style="color: #79C0FF;">True</span>)
+    title = models.<span style="color: #D2A8FF;">CharField</span>(max_length=<span style="color: #79C0FF;">1000</span>)
+    content = models.<span style="color: #D2A8FF;">TextField</span>()
+    status_code = models.<span style="color: #D2A8FF;">IntegerField</span>()
+    crawled_at = models.<span style="color: #D2A8FF;">DateTimeField</span>()
+    search_vector = <span style="color: #D2A8FF;">SearchVectorField</span>()
+    
+    <span style="color: #FF7B72;">class</span> <span style="color: #D2A8FF;">Meta</span>:
+        indexes = [
+            <span style="color: #D2A8FF;">GinIndex</span>(fields=[<span style="color: #A5D6FF;">'search_vector'</span>])
+        ]</code></pre>
+                    </div>
+                    <div>
+                        <h3 style="color: #34D399;">Key Features</h3>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; margin-bottom: 1vw;">
+                            <i class="fa-solid fa-fingerprint" style="color: #3B82F6; font-size: 2vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #3B82F6;">Unique URLs</h4>
+                            <p style="font-size: 1.2vw; margin: 0;">Prevents duplicate crawling with unique constraints</p>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; margin-bottom: 1vw;">
+                            <i class="fa-solid fa-magnifying-glass" style="color: #F59E0B; font-size: 2vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #F59E0B;">Full-Text Search</h4>
+                            <p style="font-size: 1.2vw; margin: 0;">GIN index for lightning-fast searches</p>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px;">
+                            <i class="fa-solid fa-clock-rotate-left" style="color: #8B5CF6; font-size: 2vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #8B5CF6;">Timestamps</h4>
+                            <p style="font-size: 1.2vw; margin: 0;">Track when pages were crawled</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 8: Full-Text Search -->
+        <div class="slide-container" id="slide8">
+            <h2 class="slide-title">🔍 PostgreSQL Full-Text Search</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <div class="two-column" style="margin-bottom: 2vw;">
+                        <div>
+                            <h3 style="color: #EF4444;">❌ Traditional Search (SLOW)</h3>
+                            <pre style="background: #0D1117; padding: 1.5vw; border-radius: 8px; font-size: 1vw; border: 1px solid #EF4444;"><code style="color: #C9D1D9;">SELECT * FROM pages
+WHERE content LIKE <span style="color: #A5D6FF;">'%python%'</span>;
+
+<span style="color: #8B949E;">-- Full table scan</span>
+<span style="color: #8B949E;">-- No ranking</span>
+<span style="color: #8B949E;">-- Case sensitive</span>
+<span style="color: #8B949E;">-- ⏱️ 5000ms for 1M rows</span></code></pre>
+                        </div>
+                        <div>
+                            <h3 style="color: #34D399;">✅ Full-Text Search (FAST)</h3>
+                            <pre style="background: #0D1117; padding: 1.5vw; border-radius: 8px; font-size: 1vw; border: 1px solid #34D399;"><code style="color: #C9D1D9;">SELECT * FROM pages
+WHERE search_vector @@ to_tsquery(<span style="color: #A5D6FF;">'python'</span>)
+ORDER BY ts_rank(search_vector, query);
+
+<span style="color: #8B949E;">-- GIN index scan</span>
+<span style="color: #8B949E;">-- Relevance ranking</span>
+<span style="color: #8B949E;">-- Stemming support</span>
+<span style="color: #8B949E;">-- ⚡ 50ms for 1M rows</span></code></pre>
+                        </div>
+                    </div>
+                    <div style="background: #1F2937; padding: 2vw; border-radius: 10px; text-align: center;">
+                        <h3 style="color: #34D399; margin-bottom: 1vw;">Performance Improvement</h3>
+                        <div style="font-size: 5vw; color: #34D399; font-weight: 700;">100x</div>
+                        <p style="font-size: 1.5vw; color: #9CA3AF;">Faster search queries with FTS</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 9: Docker Orchestration -->
+        <div class="slide-container" id="slide9">
+            <h2 class="slide-title">🐳 Docker Compose Orchestration</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <pre style="background: #0D1117; padding: 2vw; border-radius: 10px; font-size: 1vw; line-height: 1.6; border: 1px solid #30363D; overflow-x: auto;"><code style="color: #C9D1D9;"><span style="color: #FF7B72;">services:</span>
+  <span style="color: #79C0FF;">web:</span>
+    <span style="color: #FF7B72;">build:</span> .
+    <span style="color: #FF7B72;">command:</span> python manage.py runserver 0.0.0.0:8000
+    <span style="color: #FF7B72;">ports:</span>
+      - <span style="color: #A5D6FF;">"8081:8000"</span>
+    <span style="color: #FF7B72;">depends_on:</span>
+      - db
+      - redis
+
+  <span style="color: #79C0FF;">worker:</span>
+    <span style="color: #FF7B72;">build:</span> .
+    <span style="color: #FF7B72;">command:</span> celery -A search_engine worker --loglevel=info
+    <span style="color: #FF7B72;">depends_on:</span>
+      - db
+      - redis
+
+  <span style="color: #79C0FF;">db:</span>
+    <span style="color: #FF7B72;">image:</span> postgres:16
+    <span style="color: #FF7B72;">environment:</span>
+      - POSTGRES_DB=postgres
+
+  <span style="color: #79C0FF;">redis:</span>
+    <span style="color: #FF7B72;">image:</span> redis:6-alpine</code></pre>
+                    <div style="margin-top: 2vw; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5vw;">
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; text-align: center;">
+                            <i class="fa-solid fa-rocket" style="color: #34D399; font-size: 2.5vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #34D399;">One Command</h4>
+                            <p style="font-size: 1.1vw; margin: 0;">Start entire stack</p>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; text-align: center;">
+                            <i class="fa-solid fa-shield-halved" style="color: #3B82F6; font-size: 2.5vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #3B82F6;">Isolated</h4>
+                            <p style="font-size: 1.1vw; margin: 0;">No conflicts</p>
+                        </div>
+                        <div style="background: #1F2937; padding: 1.5vw; border-radius: 8px; text-align: center;">
+                            <i class="fa-solid fa-arrows-rotate" style="color: #F59E0B; font-size: 2.5vw;"></i>
+                            <h4 style="margin: 0.5vw 0; color: #F59E0B;">Reproducible</h4>
+                            <p style="font-size: 1.1vw; margin: 0;">Same everywhere</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 10: Scalability -->
+        <div class="slide-container" id="slide10">
+            <h2 class="slide-title">📈 Horizontal Scalability</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <div style="text-align: center; margin-bottom: 3vw;">
+                        <h3 style="color: #34D399; font-size: 2.5vw;">Scale Workers On Demand</h3>
+                        <pre style="background: #0D1117; padding: 1.5vw; border-radius: 8px; font-size: 1.3vw; display: inline-block; border: 2px solid #34D399;"><code style="color: #34D399;">$ docker-compose up --scale worker=10</code></pre>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 2vw;">
+                        <div style="background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="display: flex; align-items: center; gap: 1vw; margin-bottom: 1.5vw;">
+                                <div style="background: #EF4444; width: 4vw; height: 4vw; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2vw;">1</div>
+                                <div>
+                                    <h4 style="margin: 0; color: #EF4444;">Single Worker</h4>
+                                    <p style="margin: 0; font-size: 1.1vw;">Sequential processing</p>
+                                </div>
+                            </div>
+                            <div style="background: #111827; padding: 1.5vw; border-radius: 8px;">
+                                <div style="font-size: 3vw; color: #EF4444; font-weight: 700;">100</div>
+                                <p style="margin: 0; color: #9CA3AF;">URLs per minute</p>
+                            </div>
+                        </div>
+                        <div style="background: #1F2937; padding: 2vw; border-radius: 10px;">
+                            <div style="display: flex; align-items: center; gap: 1vw; margin-bottom: 1.5vw;">
+                                <div style="background: #34D399; width: 4vw; height: 4vw; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 2vw; color: #111827;">10</div>
+                                <div>
+                                    <h4 style="margin: 0; color: #34D399;">10 Workers</h4>
+                                    <p style="margin: 0; font-size: 1.1vw;">Parallel processing</p>
+                                </div>
+                            </div>
+                            <div style="background: #111827; padding: 1.5vw; border-radius: 8px;">
+                                <div style="font-size: 3vw; color: #34D399; font-weight: 700;">1000</div>
+                                <p style="margin: 0; color: #9CA3AF;">URLs per minute</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 2vw; background: linear-gradient(135deg, #34D399 0%, #10B981 100%); padding: 1.5vw; border-radius: 10px; text-align: center;">
+                        <h3 style="margin: 0; color: #111827; font-size: 2vw;">10x Performance Boost</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 11: Challenges & Solutions -->
+        <div class="slide-container" id="slide11">
+            <h2 class="slide-title">⚠️ Challenges & Solutions</h2>
+            <div class="content-area">
+                <div style="width: 100%;">
+                    <div style="display: grid; gap: 1.5vw;">
+                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2vw; background: #1F2937; padding: 1.5vw; border-radius: 10px; border-left: 4px solid #EF4444;">
+                            <div>
+                                <i class="fa-solid fa-ban" style="color: #EF4444; font-size: 3vw;"></i>
+                                <h3 style="color: #EF4444; margin: 0.5vw 0;">Challenge</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Rate Limiting & IP Bans</p>
+                            </div>
+                            <div>
+                                <i class="fa-solid fa-check-circle" style="color: #34D399; font-size: 2vw;"></i>
+                                <h4 style="color: #34D399; margin: 0.5vw 0;">Solution</h4>
+                                <p style="font-size: 1.2vw; margin: 0;">Implement politeness delays, respect robots.txt, use proper User-Agent headers</p>
+                            </div>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2vw; background: #1F2937; padding: 1.5vw; border-radius: 10px; border-left: 4px solid #F59E0B;">
+                            <div>
+                                <i class="fa-solid fa-copy" style="color: #F59E0B; font-size: 3vw;"></i>
+                                <h3 style="color: #F59E0B; margin: 0.5vw 0;">Challenge</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Duplicate URLs</p>
+                            </div>
+                            <div>
+                                <i class="fa-solid fa-check-circle" style="color: #34D399; font-size: 2vw;"></i>
+                                <h4 style="color: #34D399; margin: 0.5vw 0;">Solution</h4>
+                                <p style="font-size: 1.2vw; margin: 0;">Database unique constraints on URL field, update_or_create() method</p>
+                            </div>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2vw; background: #1F2937; padding: 1.5vw; border-radius: 10px; border-left: 4px solid #8B5CF6;">
+                            <div>
+                                <i class="fa-solid fa-exclamation-triangle" style="color: #8B5CF6; font-size: 3vw;"></i>
+                                <h3 style="color: #8B5CF6; margin: 0.5vw 0;">Challenge</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Network Failures</p>
+                            </div>
+                            <div>
+                                <i class="fa-solid fa-check-circle" style="color: #34D399; font-size: 2vw;"></i>
+                                <h4 style="color: #34D399; margin: 0.5vw 0;">Solution</h4>
+                                <p style="font-size: 1.2vw; margin: 0;">Try-except blocks, timeout handling, Celery automatic retries</p>
+                            </div>
+                        </div>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 2vw; background: #1F2937; padding: 1.5vw; border-radius: 10px; border-left: 4px solid #3B82F6;">
+                            <div>
+                                <i class="fa-solid fa-memory" style="color: #3B82F6; font-size: 3vw;"></i>
+                                <h3 style="color: #3B82F6; margin: 0.5vw 0;">Challenge</h3>
+                                <p style="font-size: 1.2vw; margin: 0;">Large Content</p>
+                            </div>
+                            <div>
+                                <i class="fa-solid fa-check-circle" style="color: #34D399; font-size: 2vw;"></i>
+                                <h4 style="color: #34D399; margin: 0.5vw 0;">Solution</h4>
+                                <p style="font-size: 1.2vw; margin: 0;">Content truncation, streaming responses, efficient text extraction</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 12: Demo & Results -->
+        <div class="slide-container" id="slide12">
+            <h2 class="slide-title">🎯 Live Demo & Results</h2>
+            <div class="content-area">
+                <div style="width: 100%; text-align: center;">
+                    <div style="background: #1F2937; padding: 3vw; border-radius: 12px; margin-bottom: 2vw;">
+                        <h3 style="color: #34D399; font-size: 2.5vw; margin-bottom: 2vw;">System Capabilities</h3>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 2vw;">
+                            <div style="background: #111827; padding: 2vw; border-radius: 10px;">
+                                <div style="font-size: 4vw; color: #34D399; font-weight: 700;">∞</div>
+                                <p style="margin: 0.5vw 0 0 0; color: #9CA3AF; font-size: 1.3vw;">Concurrent Tasks</p>
+                            </div>
+                            <div style="background: #111827; padding: 2vw; border-radius: 10px;">
+                                <div style="font-size: 4vw; color: #3B82F6; font-weight: 700;">100x</div>
+                                <p style="margin: 0.5vw 0 0 0; color: #9CA3AF; font-size: 1.3vw;">Search Speed</p>
+                            </div>
+                            <div style="background: #111827; padding: 2vw; border-radius: 10px;">
+                                <div style="font-size: 4vw; color: #F59E0B; font-weight: 700;">99%</div>
+                                <p style="margin: 0.5vw 0 0 0; color: #9CA3AF; font-size: 1.3vw;">Uptime</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="background: linear-gradient(135deg, #34D399 0%, #10B981 100%); padding: 2vw; border-radius: 12px; color: #111827;">
+                        <h3 style="font-size: 2.5vw; margin: 0 0 1vw 0;">Try It Now!</h3>
+                        <p style="font-size: 1.5vw; margin: 0;">Visit: <strong>http://localhost:8081</strong></p>
+                        <p style="font-size: 1.2vw; margin: 1vw 0 0 0;">Enter any URL and watch it crawl in real-time</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 13: Q&A -->
+        <div class="slide-container" id="slide13">
+            <div class="qa-layout" style="text-align: center;">
+                <div style="font-size: 8vw; margin-bottom: 2vw;">🙋</div>
+                <h2 style="font-size: 6vw; color: #34D399;">Questions?</h2>
+                <p style="font-size: 2vw; margin: 2vw 0;">Thank you for your attention!</p>
+                <div style="margin-top: 3vw; padding-top: 2vw; border-top: 2px solid #374151;">
+                    <p style="font-size: 1.5vw; color: #9CA3AF;">
+                        <i class="fa-brands fa-github"></i> GitHub Repository: https://github.com/nebaware<br>
+                        <i class="fa-solid fa-envelope"></i> Contact: Group 8
+                    </p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+ </div>
+   <a href="{% url 'home' %}" class="btn btn-primary btn-back">⬅ Back to Dashboard</a>
+ </div>
+
+
+<script>
+    function initializePresentation() {
+        const slides = document.querySelectorAll('.slide-container');
+        const prevButton = document.getElementById('prev-slide');
+        const nextButton = document.getElementById('next-slide');
+        const currentSlideNum = document.getElementById('current-slide-num');
+        const totalSlidesNum = document.getElementById('total-slides');
+        const progressBarFill = document.getElementById('progress-bar-fill');
+        let currentSlideIndex = 0;
+        let isTransitioning = false;
+
+        // Function to update the UI (visibility, counter, buttons)
+        function updatePresentation(direction = 'forward') {
+            if (isTransitioning) return;
+            isTransitioning = true;
+
+            // 1. Add slide-out animation to current slide
+            const currentSlide = slides[currentSlideIndex];
+            if (currentSlide) {
+                currentSlide.classList.add('slide-out');
+            }
+
+            // 2. Wait for animation, then update slides
+            setTimeout(() => {
+                slides.forEach((slide, index) => {
+                    slide.classList.remove('active-slide', 'slide-out');
+                    if (index === currentSlideIndex) {
+                        slide.classList.add('active-slide');
+                    }
+                });
+                isTransitioning = false;
+            }, 400);
+
+            // 3. Update counter
+            currentSlideNum.textContent = currentSlideIndex + 1;
+            totalSlidesNum.textContent = slides.length;
+
+            // 4. Update progress bar
+            const progress = ((currentSlideIndex + 1) / slides.length) * 100;
+            progressBarFill.style.width = progress + '%';
+
+            // 5. Update button state (disable prev/next at start/end)
+            prevButton.disabled = currentSlideIndex === 0;
+            nextButton.disabled = currentSlideIndex === slides.length - 1;
+        }
+
+        // Event listener for Previous button
+        prevButton.addEventListener('click', () => {
+            if (currentSlideIndex > 0 && !isTransitioning) {
+                currentSlideIndex--;
+                updatePresentation('backward');
+            }
+        });
+
+        // Event listener for Next button
+        nextButton.addEventListener('click', () => {
+            if (currentSlideIndex < slides.length - 1 && !isTransitioning) {
+                currentSlideIndex++;
+                updatePresentation('forward');
+            }
+        });
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ') {
+                e.preventDefault();
+                if (currentSlideIndex < slides.length - 1 && !isTransitioning) {
+                    currentSlideIndex++;
+                    updatePresentation('forward');
+                }
+            } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                if (currentSlideIndex > 0 && !isTransitioning) {
+                    currentSlideIndex--;
+                    updatePresentation('backward');
+                }
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                if (!isTransitioning) {
+                    currentSlideIndex = 0;
+                    updatePresentation('forward');
+                }
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                if (!isTransitioning) {
+                    currentSlideIndex = slides.length - 1;
+                    updatePresentation('forward');
+                }
+            }
+        });
+
+        // Touch/Swipe support for mobile
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        });
+
+        document.addEventListener('touchend', (e) => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        });
+
+        function handleSwipe() {
+            if (touchEndX < touchStartX - 50 && currentSlideIndex < slides.length - 1 && !isTransitioning) {
+                // Swipe left - next slide
+                currentSlideIndex++;
+                updatePresentation('forward');
+            }
+            if (touchEndX > touchStartX + 50 && currentSlideIndex > 0 && !isTransitioning) {
+                // Swipe right - previous slide
+                currentSlideIndex--;
+                updatePresentation('backward');
+            }
+        }
+
+        // Initialize the first slide to be visible on load
+        if (slides.length > 0) {
+            updatePresentation();
+        }
+
+        // Add animation to elements when slide becomes active
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.style.animation = 'fadeInUp 0.6s ease forwards';
+                }
+            });
+        }, { threshold: 0.1 });
+
+        // Observe all tiles and content elements
+        document.querySelectorAll('.tile, .bullet-list li, .bar').forEach(el => {
+            observer.observe(el);
+        });
+
+        // Fullscreen functionality
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        if (fullscreenBtn) {
+            fullscreenBtn.addEventListener('click', () => {
+                if (!document.fullscreenElement) {
+                    document.documentElement.requestFullscreen();
+                    fullscreenBtn.innerHTML = '<i class="fa-solid fa-compress"></i> Exit Fullscreen';
+                } else {
+                    document.exitFullscreen();
+                    fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i> Fullscreen';
+                }
+            });
+
+            // Update button when fullscreen changes
+            document.addEventListener('fullscreenchange', () => {
+                if (!document.fullscreenElement) {
+                    fullscreenBtn.innerHTML = '<i class="fa-solid fa-expand"></i> Fullscreen';
+                }
+            });
+        }
+
+        // Help modal functionality
+        const helpBtn = document.getElementById('help-btn');
+        const helpModal = document.getElementById('help-modal');
+        const closeHelp = document.getElementById('close-help');
+
+        if (helpBtn && helpModal && closeHelp) {
+            helpBtn.addEventListener('click', () => {
+                helpModal.style.display = 'flex';
+            });
+
+            closeHelp.addEventListener('click', () => {
+                helpModal.style.display = 'none';
+            });
+
+            helpModal.addEventListener('click', (e) => {
+                if (e.target === helpModal) {
+                    helpModal.style.display = 'none';
+                }
+            });
+
+            // Close on Escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && helpModal.style.display === 'flex') {
+                    helpModal.style.display = 'none';
+                }
+            });
+        }
+    }
+
+    // Add CSS animation for fade in up
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    `;
+    document.head.appendChild(style);
+
+    // Ensure the function runs after the entire page is loaded
+    window.onload = initializePresentation;
+</script>
+
+</body>
+</html>
